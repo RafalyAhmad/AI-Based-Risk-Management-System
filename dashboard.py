@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
 from scraper import NewsScraper
+from risk_assessment import SecurityRiskAssessment
 
 # Contoh data users
 users = [
@@ -9,6 +10,10 @@ users = [
     {"id": 2, "name": "Admin 2", "email": "admin2@example.com"},
     {"id": 3, "name": "User 1", "email": "user1@example.com"}
 ]
+
+# Global variables
+current_headlines = []
+risk_assessor = SecurityRiskAssessment()
 
 # Fungsi tambah user
 def add_user():
@@ -30,6 +35,60 @@ def refresh_table():
     for user in users:
         tree.insert("", tk.END, values=(user["id"], user["name"], user["email"]))
 
+
+def update_risk_assessment():
+    """Update risk assessment display based on current headlines"""
+    global current_headlines
+    
+    if not current_headlines:
+        # Clear the risk assessment display
+        risk_score_label.config(text="--", bg="#CCCCCC")
+        risk_level_label.config(text="Data belum tersedia")
+        risk_status_label.config(text="")
+        risk_description_label.config(text="Fetch berita terlebih dahulu untuk melihat penilaian keamanan")
+        
+        # Clear breakdown
+        for row in tree_breakdown.get_children():
+            tree_breakdown.delete(row)
+        
+        # Clear articles
+        for row in tree_risk_articles.get_children():
+            tree_risk_articles.delete(row)
+        
+        return
+    
+    # Calculate risk assessment
+    risk_result = risk_assessor.analyze_articles_with_risk(current_headlines)
+    risk_score = risk_result['risk_score']
+    level_info = risk_result['level_info']
+    
+    # Update main risk score display
+    risk_score_label.config(text=str(risk_score), bg=level_info['color'], fg="white")
+    risk_level_label.config(text=level_info['level'], fg=level_info['color'])
+    risk_status_label.config(text=level_info['description'])
+    risk_description_label.config(text=risk_result['details'])
+    
+    # Update keyword breakdown
+    for row in tree_breakdown.get_children():
+        tree_breakdown.delete(row)
+    
+    for category, count in risk_result['keyword_breakdown'].items():
+        tree_breakdown.insert("", tk.END, values=(category.capitalize(), count))
+    
+    # Update risky articles
+    for row in tree_risk_articles.get_children():
+        tree_risk_articles.delete(row)
+    
+    risky_articles = [a for a in risk_result['articles'] if a.get('has_risk_keywords', False)]
+    for idx, article in enumerate(risky_articles, 1):
+        keywords_str = ", ".join([k[1] for k in article.get('risk_keywords', [])])
+        tree_risk_articles.insert("", tk.END, values=(
+            idx,
+            article['title'][:40] + "..." if len(article['title']) > 40 else article['title'],
+            article['source'],
+            keywords_str[:30] + "..." if len(keywords_str) > 30 else keywords_str
+        ))
+
 # Fungsi scraping news headlines
 def fetch_news():
     """Fetch news headlines in a separate thread"""
@@ -37,11 +96,13 @@ def fetch_news():
         btn_fetch_news.config(state=tk.DISABLED, text="Loading...")
         
         def scrape_in_thread():
+            global current_headlines
             try:
                 scraper = NewsScraper()
                 headlines = scraper.get_all_headlines()
+                current_headlines = headlines
                 
-                # Clear existing items
+                # Clear existing items in news tab
                 for row in tree_news.get_children():
                     tree_news.delete(row)
                 
@@ -53,6 +114,9 @@ def fetch_news():
                         article['source'],
                         article['category']
                     ))
+                
+                # Update risk assessment
+                update_risk_assessment()
                 
                 messagebox.showinfo("Success", f"Fetched {len(headlines)} news headlines!")
             except Exception as e:
@@ -105,6 +169,68 @@ email_entry = tk.Entry(frame_input)
 email_entry.grid(row=1, column=1, padx=5, pady=5)
 
 tk.Button(frame_input, text="Add User", command=add_user).grid(row=2, column=0, columnspan=2, pady=10)
+
+# ==================== TAB 2: SECURITY RISK ASSESSMENT ====================
+tab_risk = ttk.Frame(notebook)
+notebook.add(tab_risk, text="Security Risk Assessment")
+
+# Main risk score display
+frame_risk_main = tk.Frame(tab_risk)
+frame_risk_main.pack(pady=20)
+
+tk.Label(frame_risk_main, text="Tingkat Keamanan Daerah:", font=("Arial", 12, "bold")).pack()
+
+# Risk score in big circle
+risk_score_label = tk.Label(frame_risk_main, text="--", font=("Arial", 60, "bold"), 
+                            width=5, height=2, bg="#CCCCCC", fg="white", relief=tk.RAISED)
+risk_score_label.pack(pady=10)
+
+tk.Label(frame_risk_main, text="Skala 0-5", font=("Arial", 10)).pack()
+
+risk_level_label = tk.Label(frame_risk_main, text="Data belum tersedia", font=("Arial", 16, "bold"), fg="#999999")
+risk_level_label.pack(pady=5)
+
+risk_status_label = tk.Label(frame_risk_main, text="", font=("Arial", 11))
+risk_status_label.pack(pady=5)
+
+risk_description_label = tk.Label(frame_risk_main, text="Fetch berita terlebih dahulu untuk melihat penilaian keamanan", 
+                                  font=("Arial", 9), fg="#666666", wraplength=400)
+risk_description_label.pack(pady=10)
+
+# Frame for breakdown
+frame_breakdown = tk.LabelFrame(tab_risk, text="Breakdown Jenis Kejahatan", font=("Arial", 11, "bold"))
+frame_breakdown.pack(pady=10, padx=10, fill=tk.X)
+
+breakdown_columns = ("Kategori", "Jumlah")
+tree_breakdown = ttk.Treeview(frame_breakdown, columns=breakdown_columns, show="headings", height=5)
+for col in breakdown_columns:
+    tree_breakdown.heading(col, text=col)
+    if col == "Kategori":
+        tree_breakdown.column(col, width=150)
+    else:
+        tree_breakdown.column(col, width=80)
+tree_breakdown.pack(fill=tk.X, padx=5, pady=5)
+
+# Frame for risky articles
+frame_risk_articles = tk.LabelFrame(tab_risk, text="Artikel yang Mengandung Kata Kunci Risiko", font=("Arial", 11, "bold"))
+frame_risk_articles.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
+
+scrollbar_risk = ttk.Scrollbar(frame_risk_articles)
+scrollbar_risk.pack(side=tk.RIGHT, fill=tk.Y)
+
+risk_articles_columns = ("No", "Judul", "Sumber", "Kata Kunci")
+tree_risk_articles = ttk.Treeview(frame_risk_articles, columns=risk_articles_columns, show="headings", 
+                                  height=10, yscrollcommand=scrollbar_risk.set)
+scrollbar_risk.config(command=tree_risk_articles.yview)
+for col in risk_articles_columns:
+    tree_risk_articles.heading(col, text=col)
+    if col == "Judul":
+        tree_risk_articles.column(col, width=250)
+    elif col == "Kata Kunci":
+        tree_risk_articles.column(col, width=150)
+    else:
+        tree_risk_articles.column(col, width=80)
+tree_risk_articles.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
 # ==================== TAB 2: NEWS SCRAPER ====================
 tab_news = ttk.Frame(notebook)
