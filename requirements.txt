@@ -1,2 +1,7 @@
+<<<<<<< HEAD
 requests==2.31.0
 beautifulsoup4==4.12.2
+=======
+requests==2.31.0
+beautifulsoup4==4.12.2
+>>>>>>> 1c9aea3ee91080619a00f831e2b627bdc8385164
